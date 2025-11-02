@@ -64,24 +64,82 @@ class oneDriveApi:
     def uploadFile(self, onedriveFolder, localFilePath):
         cuttoffSize = 262144000
         version = "v1.0"
-        urlSafePath = requests.utils.quote(localFilePath)
-        
-        if os.path.getsize(localFilePath):
-            url = f"{version}/me/drive/items/{parent-id}:/{filename}:/content"
-            headers = {"Authorization": f"Bearer {self.accessToken}","Content-Type": f"plain"}
+        filename = os.path.basename(localFilePath)
+        urlSafePath = requests.utils.quote(f"{onedriveFolder}/{filename}", safe="")
 
-            response = requests.post(url=url,headers=headers)
-            print(f"Status Code: {response.status_code}")
+        if os.path.getsize(localFilePath) <= cuttoffSize:
+            url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/content"
+            headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/octet-stream"}
+            print(headers)
 
-            if response.status_code != 200:
+            with open(localFilePath, "rb") as f:
+                response = requests.put(url=url, headers=headers, data=f)
+                print(f"Status Code: {response.status_code}")
+
+            if response.status_code not in (200, 201):
+                print("Upload failed:")
                 print(response.text)
-
-                return
-            
-            print(response.text)
+            else:
+                print("Upload succeeded (simple upload).")
             return
 
-        pass
+        # Large file -> create an upload session and upload in chunks
+        create_session_url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/createUploadSession"
+        session_headers = {"Authorization": f"Bearer {self.accessToken}"}
+        session_body = {"item": {"@microsoft.graph.conflictBehavior": "replace", "name": filename}}
+
+        print("Creating upload session...")
+        session_resp = requests.post(create_session_url, headers=session_headers, json=session_body)
+        print(f"Create session status: {session_resp.status_code}")
+        if session_resp.status_code not in (200, 201):
+            print("Failed to create upload session:")
+            print(session_resp.text)
+            return
+
+        upload_url = session_resp.json().get("uploadUrl")
+        if not upload_url:
+            print("No uploadUrl returned by createUploadSession.")
+            return
+
+        fileSize = os.path.getsize(localFilePath)
+        chunkSize = 10485760  # 10 MB (in bytes)
+        uploaded = 0
+
+        print(f"Starting chunked upload: {fileSize} bytes total, chunk size {chunkSize} bytes")
+
+        with open(localFilePath, "rb") as f:
+            while uploaded < fileSize:
+                start = uploaded
+                end = min(uploaded + chunkSize, fileSize) - 1
+                chunkLength = end - start + 1
+
+                f.seek(start)
+                chunkData = f.read(chunkLength)
+
+                headers = {"Content-Length": str(chunkLength),"Content-Range": f"bytes {start}-{end}/{fileSize}"}
+
+                response = requests.put(upload_url, headers=headers, data=chunkData)
+
+                if response.status_code in (200, 201):
+                    uploaded = fileSize
+                    print("Upload complete.")
+                    break
+                elif response.status_code == 202:
+                    uploaded = end + 1
+                    progress = (uploaded / fileSize) * 100
+                    continue
+                else:
+                    print(response.text)
+                    return
+
+        print("Large file upload finished.")
+    
+    def listDir(self,onedrivePath):
+        version = "v1.0"
+
+
+
+
 
 
 def differ(local_path, icloud_file):
@@ -143,4 +201,4 @@ if __name__ == "__main__":
         scopes = f.readline().strip().split(",")
 
     api = oneDriveApi(tenantId, clientId, scopes, onedriveAuthCache)
-    api.uploadFile(r"onedrive_test",r"/home/gavin/downloads/onedrive_test/test.docx")
+    api.uploadFile(r"onedrive_test",r"/home/gavin/downloads/onedrive_test/large_upload_test.pdf")
