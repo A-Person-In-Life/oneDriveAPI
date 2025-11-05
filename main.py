@@ -152,7 +152,7 @@ class oneDriveApi:
     def getMetaData(self, onedrivePath, output):
         version = "v1.0"
         urlSafePath = requests.utils.quote(onedrivePath)
-        url = f"https://graph.microsoft.com/v1.0/driveItem/drive/root:/{urlSafePath}"
+        url = f"https://graph.microsoft.com/{version}/driveItem/drive/root:/{urlSafePath}"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
 
         response = requests.get(url=url,headers=headers)
@@ -161,57 +161,48 @@ class oneDriveApi:
             return
         
         data = response.json()
-        print(data["content"])
-        return data["content"]
+        print(data[output])
+        return data[output]
 
+class execution: 
+    def __init__(self,workers):
+        self.oneDriveApi = oneDriveApi()
+        self.workers = workers
 
+    def differ(self, localPath, onedrivePath):
+        onedriveSize = self.oneDriveApi.getMetaData(onedrivePath,"size")
+        onedriveDate = self.oneDriveApi.getMetaData(onedrivePath, "lastModifiedDateTime")
 
-def differ(local_path, icloud_file):
-    icloud_size = icloud_file.size
-    local_size = os.path.getsize(local_path)
+        localSize = os.path.getsize(localPath)
+        localDate = os.path.getmtime(localPath)
+        
 
-    if local_size != icloud_size:
-        return True
-    
-    print(icloud_file.date_modified.timestamp())
-    print(os.path.getmtime(local_path))
+    def push(local_folder_path, icloud_folder=None):
+        print("Scanning local folder:")
+        files = []
 
-    if (os.path.getmtime(local_path) == icloud_file.date_modified.timestamp()):
-        return True
-    
-    return False    
-
-def upload_file(file_path, icloud_folder):
-    with open(file_path, "rb") as f:
-        icloud_folder.upload(f, filename=os.path.basename(file_path))
-
-
-def push_icloud(local_folder_path, icloud_folder=None):
-    print("Scanning local folder:")
-    files = []
-
-    for file in os.listdir(local_folder_path):
-        if os.path.isfile(os.path.join(local_folder_path, file)):
-            files.append(file)
-    print(f"Found {len(files)} files to upload!")
-    
-    executer = ThreadPoolExecutor(max_workers=4)
-    print("Created a pool of 4 threads!") 
-    
-    futures = []
-    for file in files:
-        print(f"Scheduling upload for {file}")
-        future = executer.submit(upload_file, os.path.join(local_folder_path, file), icloud_folder)
-        futures.append(future)
-    
-    for future in as_completed(futures):
-        try:
-            future.result()
-        except Exception as e:
-            print(f"An upload failed: {e}")
-    
-    executer.shutdown(wait=True)
-    print("All uploads finished!")
+        for file in os.listdir(local_folder_path):
+            if os.path.isfile(os.path.join(local_folder_path, file)):
+                files.append(file)
+        print(f"Found {len(files)} files to upload!")
+        
+        executer = ThreadPoolExecutor(max_workers=4)
+        print("Created a pool of 4 threads!") 
+        
+        futures = []
+        for file in files:
+            print(f"Scheduling upload for {file}")
+            future = executer.submit(upload_file, os.path.join(local_folder_path, file), icloud_folder)
+            futures.append(future)
+        
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"An upload failed: {e}")
+        
+        executer.shutdown(wait=True)
+        print("All uploads finished!")
 
 
 if __name__ == "__main__":
