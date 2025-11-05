@@ -133,7 +133,7 @@ class oneDriveApi:
 
         print("Large file upload finished.")
     
-    def listDir(self,onedrivePath):
+    def listOneDriveDir(self,onedrivePath):
         version = "v1.0"
         urlSafePath = requests.utils.quote(onedrivePath)
         url =  f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
@@ -148,12 +148,21 @@ class oneDriveApi:
         data = response.json()
         print(data["value"])
         return data["value"]
+    
+    def getMetaData(self, onedrivePath, output):
+        version = "v1.0"
+        urlSafePath = requests.utils.quote(onedrivePath)
+        url = f"https://graph.microsoft.com/v1.0/driveItem/drive/root:/{urlSafePath}"
+        headers = {"Authorization": f"Bearer {self.accessToken}"}
+
+        response = requests.get(url=url,headers=headers)
+        if response != 200:
+            print("getMetaData failed")
+            return
         
-
-
-
-
-
+        data = response.json()
+        print(data["content"])
+        return data["content"]
 
 
 
