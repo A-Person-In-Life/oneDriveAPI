@@ -83,7 +83,6 @@ class oneDriveApi:
                 print("Upload succeeded (simple upload).")
             return
 
-        # Large file -> create an upload session and upload in chunks
         create_session_url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/createUploadSession"
         session_headers = {"Authorization": f"Bearer {self.accessToken}"}
         session_body = {"item": {"@microsoft.graph.conflictBehavior": "replace", "name": filename}}
@@ -102,7 +101,7 @@ class oneDriveApi:
             return
 
         fileSize = os.path.getsize(localFilePath)
-        chunkSize = 10485760  # 10 MB (in bytes)
+        chunkSize = 10485760
         uploaded = 0
 
         print(f"Starting chunked upload: {fileSize} bytes total, chunk size {chunkSize} bytes")
@@ -136,6 +135,22 @@ class oneDriveApi:
     
     def listDir(self,onedrivePath):
         version = "v1.0"
+        urlSafePath = requests.utils.quote(onedrivePath)
+        url =  f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
+        headers = {"Authorization": f"Bearer {self.accessToken}"}
+
+
+        response = requests.get(url=url, headers=headers)
+        if response.status_code != 200:
+            print("lisdir failed")
+            return
+        
+        data = response.json()
+        print(data["value"])
+        return data["value"]
+        
+
+
 
 
 
