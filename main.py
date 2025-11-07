@@ -40,10 +40,10 @@ class oneDriveApi:
         if token_cache.has_state_changed:
             with open(cache_path, "w") as f:
                 f.write(token_cache.serialize())
-
-    def downloadFile(self, file_path, local_destination):
+                
+    def downloadFile(self, onedriveFolder, localDestination):
         version = "v1.0"
-        urlSafePath = requests.utils.quote(file_path)
+        urlSafePath = requests.utils.quote(onedriveFolder, safe="/")
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
 
@@ -51,14 +51,24 @@ class oneDriveApi:
         print(f"Status Code: {response.status_code}")
         
         if response.status_code != 200:
+            print(f"Failed to get file info: {response.status_code}")
             return
             
         data = response.json()
         download_url = data.get("@microsoft.graph.downloadUrl")
         filename = data.get("name")
+        if not download_url or not filename:
+            print("Missing download URL or filename")
+            return
+            
         print(f"Download URL: {download_url}")
+        
+        # Create subdirectories if needed
+        os.makedirs(localDestination, exist_ok=True)
+        
         file = requests.get(download_url)
-        with open(os.path.join(local_destination,filename), "wb") as f:
+        localPath = os.path.join(localDestination, filename)
+        with open(localPath, "wb") as f:
             f.write(file.content)
         
     def uploadFile(self, onedriveFolder, localFilePath):
@@ -133,21 +143,29 @@ class oneDriveApi:
 
         print("Large file upload finished.")
     
-    def listOneDriveDir(self,onedrivePath):
+    def listOneDriveDir(self, onedrivePath):
         version = "v1.0"
         urlSafePath = requests.utils.quote(onedrivePath)
-        url =  f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
+        url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
-
 
         response = requests.get(url=url, headers=headers)
         if response.status_code != 200:
-            print("lisdir failed")
-            return
-        
+            print(f"listOneDriveDir failed for {onedrivePath}: {response.status_code}")
+            return []
+
         data = response.json()
-        print(data["value"])
-        return data["value"]
+        items = data["value"]
+        
+        results = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+                
+            name = item.get("name")
+            results.append(name)
+                
+        return results
     
     def getMetaData(self, onedrivePath, output):
         version = "v1.0"
@@ -165,8 +183,8 @@ class oneDriveApi:
         return data[output]
 
 class execution: 
-    def __init__(self,workers):
-        self.oneDriveApi = oneDriveApi()
+    def __init__(self,workers,api):
+        self.api = api
         self.workers = workers
 
     def differ(self, localPath, onedrivePath):
@@ -176,14 +194,31 @@ class execution:
         localSize = os.path.getsize(localPath)
         localDate = os.path.getmtime(localPath)
         
+    def checkNames(self, names,localFolderPath):
+        filteredNames = []
+        for name in names:
+            if not os.path.exists(os.path.join(localFolderPath, name)):
+                filteredNames.append(name)
+        return filteredNames
 
-    def push(local_folder_path, icloud_folder=None):
+    def checkLocalFiles(self, names, onedriveFolder):
+        onedriveNames = self.api.listOneDriveDir(onedriveFolder)
+        filteredNames = []
+        for name in names:
+            if name not in onedriveNames:
+                filteredNames.append(name)
+        return filteredNames
+                
+
+    def push(self,localFolderPath, onedriveFolder):
         print("Scanning local folder:")
         files = []
 
-        for file in os.listdir(local_folder_path):
-            if os.path.isfile(os.path.join(local_folder_path, file)):
+        for file in os.listdir(localFolderPath):
+            if os.path.isfile(os.path.join(localFolderPath, file)):
                 files.append(file)
+
+        files = self.checkLocalFiles(files, onedriveFolder)
         print(f"Found {len(files)} files to upload!")
         
         executer = ThreadPoolExecutor(max_workers=4)
@@ -192,7 +227,7 @@ class execution:
         futures = []
         for file in files:
             print(f"Scheduling upload for {file}")
-            future = executer.submit(upload_file, os.path.join(local_folder_path, file), icloud_folder)
+            future = executer.submit(self.api.uploadFile, onedriveFolder, os.path.join(localFolderPath, file))
             futures.append(future)
         
         for future in as_completed(futures):
@@ -203,6 +238,30 @@ class execution:
         
         executer.shutdown(wait=True)
         print("All uploads finished!")
+    
+    def pull(self,localFolderPath, onedriveFolder):
+        print("Scanning OneDrive folder:")
+        files = []
+        for name in self.api.listOneDriveDir(onedriveFolder):
+            files.append(name)
+        files = self.checkNames(files,localFolderPath)
+        print(f"Found {len(files)} files to dzownload!")
+        print(files)
+        
+        executer = ThreadPoolExecutor(max_workers=4)
+        print("Created a pool of 4 threads!") 
+
+        futures = []
+        for file in files:
+            print(f"Scheduling download for {file}")
+            future = executer.submit(self.api.downloadFile, os.path.join(onedriveFolder,file), localFolderPath)
+            futures.append(future)
+        
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"A download failed: {e}")
 
 
 if __name__ == "__main__":
@@ -216,4 +275,5 @@ if __name__ == "__main__":
         scopes = f.readline().strip().split(",")
 
     api = oneDriveApi(tenantId, clientId, scopes, onedriveAuthCache)
-    api.uploadFile(r"onedrive_test",r"/home/gavin/downloads/onedrive_test/large_upload_test.pdf")
+    function = execution(6,api)
+    function.push(r"/home/gavin/onedrive/test",r"test")
