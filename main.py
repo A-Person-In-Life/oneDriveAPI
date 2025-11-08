@@ -140,7 +140,7 @@ class oneDriveApi:
 
         print("Large file upload finished.")
     
-    def listOneDriveDir(self, onedrivePath):
+    def listDir(self, onedrivePath):
         version = "v1.0"
         urlSafePath = requests.utils.quote(onedrivePath)
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
@@ -148,12 +148,11 @@ class oneDriveApi:
 
         response = requests.get(url=url, headers=headers)
         if response.status_code != 200:
-            print(f"listOneDriveDir failed for {onedrivePath}: {response.status_code}")
+            print(f"listDir failed for {onedrivePath}: {response.status_code}")
             return []
 
         data = response.json()
         items = data["value"]
-        q
         results = []
         for item in items:
             if not isinstance(item, dict):
@@ -167,17 +166,31 @@ class oneDriveApi:
     def getMetaData(self, onedrivePath, output):
         version = "v1.0"
         urlSafePath = requests.utils.quote(onedrivePath)
-        url = f"https://graph.microsoft.com/{version}/driveItem/drive/root:/{urlSafePath}"
+        url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
 
         response = requests.get(url=url,headers=headers)
-        if response != 200:
+        if not response.status_code in (200,201):
             print("getMetaData failed")
+            print(response.status_code)
+            print(response.text)
             return
         
         data = response.json()
         print(data[output])
         return data[output]
+    
+    def makeDir(self,onedrivePath,onedriveFolderName):
+        version = "v1.0"
+        urlSafePath = requests.utils.quote(onedrivePath)
+        parentId = self.getMetaData(urlSafePath,output="id")
+        url = f"https://graph.microsoft.com/{version}/me/drive/root/{parentId}/children"
+        headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/json"}
+        json = {"name": f"{onedriveFolderName}","folder": { },"@microsoft.graph.conflictBehavior": "rename"}
+
+        response = requests.post(url=url,headers=headers,json=json)
+        print(response.status_code)
+        print(response.text)
 
 class execution: 
     def __init__(self,workers,api):
@@ -202,7 +215,7 @@ class execution:
         return filteredNames
 
     def checkLocalFiles(self, names, onedriveFolder):
-        onedriveNames = self.api.listOneDriveDir(onedriveFolder)
+        onedriveNames = self.api.listDir(onedriveFolder)
         filteredNames = []
         for name in names:
             if name not in onedriveNames:
@@ -213,15 +226,18 @@ class execution:
     def push(self,localFolderPath, onedriveFolder):
         print("Scanning local folder:")
         files = []
+        folders = []
 
-        for file in os.listdir(localFolderPath):
-            if os.path.isfile(os.path.join(localFolderPath, file)):
-                files.append(file)
+        for entry in os.listdir(localFolderPath):
+            if os.path.isfile(os.path.join(localFolderPath, entry)):
+                files.append(entry)
+            if os.path.isdir(localFolderPath):
+                folders.append(entry)
 
         files = self.checkLocalFiles(files, onedriveFolder)
         print(f"Found {len(files)} files to upload!")
         
-        executer = ThreadPoolExecutor(max_workers=4)
+        executer = ThreadPoolExecutor(max_workers=self.workers)
         print("Created a pool of 4 threads!") 
         
         futures = []
@@ -229,6 +245,9 @@ class execution:
             print(f"Scheduling upload for {file}")
             future = executer.submit(self.api.uploadFile, onedriveFolder, os.path.join(localFolderPath, file))
             futures.append(future)
+        
+        for folder in folders:
+            print(f"Scheduling creation for {file}")
         
         for future in as_completed(futures):
             try:
@@ -242,13 +261,13 @@ class execution:
     def pull(self,localFolderPath, onedriveFolder):
         print("Scanning OneDrive folder:")
         files = []
-        for name in self.api.listOneDriveDir(onedriveFolder):
+        for name in self.api.listDir(onedriveFolder):
             files.append(name)
         files = self.checkNames(files,localFolderPath)
         print(f"Found {len(files)} files to dzownload!")
         print(files)
         
-        executer = ThreadPoolExecutor(max_workers=4)
+        executer = ThreadPoolExecutor(max_workers=self.workers)
         print("Created a pool of 4 threads!") 
 
         futures = []
@@ -276,4 +295,4 @@ if __name__ == "__main__":
 
     api = oneDriveApi(tenantId, clientId, scopes, onedriveAuthCache)
     function = execution(6,api)
-    function.push(r"/home/gavin/onedrive/test",r"test")
+    api.makeDir("Pictures/fanart/","sethoscara")
