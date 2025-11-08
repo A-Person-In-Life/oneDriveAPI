@@ -62,10 +62,7 @@ class oneDriveApi:
             return
             
         print(f"Download URL: {download_url}")
-        
-        # Create subdirectories if needed
-        os.makedirs(localDestination, exist_ok=True)
-        
+                
         file = requests.get(download_url)
         localPath = os.path.join(localDestination, filename)
         with open(localPath, "wb") as f:
@@ -156,7 +153,7 @@ class oneDriveApi:
 
         data = response.json()
         items = data["value"]
-        
+        q
         results = []
         for item in items:
             if not isinstance(item, dict):
@@ -193,6 +190,9 @@ class execution:
 
         localSize = os.path.getsize(localPath)
         localDate = os.path.getmtime(localPath)
+
+        if onedriveSize == localSize and onedriveDate == localDate:
+            return False
         
     def checkNames(self, names,localFolderPath):
         filteredNames = []
