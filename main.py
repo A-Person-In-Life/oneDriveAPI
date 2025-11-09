@@ -3,21 +3,22 @@ import os
 import requests
 from msal import PublicClientApplication, SerializableTokenCache
 import webbrowser
+import sys
 
 
-class oneDriveApi:
-    def __init__(self, tenantId, clientId, scopes, cache_path):
+class OneDriveApi:
+    def __init__(self, tenantId, clientId, scopes, cachePath):
         self.tenantId = tenantId
         self.clientId = clientId
         self.scopes = scopes
         self.accessToken = None
-        self.cache_path = cache_path
+        self.cachePath = cachePath
         
         authority = f"https://login.microsoftonline.com/{tenantId}"
-        token_cache = SerializableTokenCache()
-        with open(cache_path, "r") as f:
-            token_cache.deserialize(f.read())
-        self.app = PublicClientApplication(client_id=clientId,authority=authority,token_cache=token_cache)
+        tokenCache = SerializableTokenCache()
+        with open(cachePath, "r") as f:
+            tokenCache.deserialize(f.read())
+        self.app = PublicClientApplication(client_id=clientId, authority=authority, token_cache=tokenCache)
 
         accounts = self.app.get_accounts()
         if accounts:
@@ -37,13 +38,13 @@ class oneDriveApi:
         else:
             raise ValueError(f"Error acquiring token: {result.get('error_description')}")
 
-        if token_cache.has_state_changed:
-            with open(cache_path, "w") as f:
-                f.write(token_cache.serialize())
+        if tokenCache.has_state_changed:
+            with open(cachePath, "w") as f:
+                f.write(tokenCache.serialize())
                 
-    def downloadFile(self, onedriveFolder, localDestination):
+    def downloadFile(self, oneDriveFolder, localDestination):
         version = "v1.0"
-        urlSafePath = requests.utils.quote(onedriveFolder, safe="/")
+        urlSafePath = requests.utils.quote(oneDriveFolder, safe="/")
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
 
@@ -55,26 +56,26 @@ class oneDriveApi:
             return
             
         data = response.json()
-        download_url = data.get("@microsoft.graph.downloadUrl")
-        filename = data.get("name")
-        if not download_url or not filename:
-            print("Missing download URL or filename")
+        downloadUrl = data.get("@microsoft.graph.downloadUrl")
+        fileName = data.get("name")
+        if not downloadUrl or not fileName:
+            print("Missing download URL or fileName")
             return
             
-        print(f"Download URL: {download_url}")
+        print(f"Download URL: {downloadUrl}")
                 
-        file = requests.get(download_url)
-        localPath = os.path.join(localDestination, filename)
+        file = requests.get(downloadUrl)
+        localPath = os.path.join(localDestination, fileName)
         with open(localPath, "wb") as f:
             f.write(file.content)
         
-    def uploadFile(self, onedriveFolder, localFilePath):
-        cuttoffSize = 262144000
+    def uploadFile(self, oneDriveFolder, localFilePath):
+        cutoffSize = 262144000
         version = "v1.0"
-        filename = os.path.basename(localFilePath)
-        urlSafePath = requests.utils.quote(f"{onedriveFolder}/{filename}", safe="")
+        fileName = os.path.basename(localFilePath)
+        urlSafePath = requests.utils.quote(f"{oneDriveFolder}/{fileName}", safe="")
 
-        if os.path.getsize(localFilePath) <= cuttoffSize:
+        if os.path.getsize(localFilePath) <= cutoffSize:
             url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/content"
             headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/octet-stream"}
             print(headers)
@@ -85,25 +86,24 @@ class oneDriveApi:
 
             if response.status_code not in (200, 201):
                 print("Upload failed:")
-                print(response.text)
             else:
-                print("Upload succeeded (simple upload).")
+                print("Small upload succeeded")
             return
 
-        create_session_url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/createUploadSession"
-        session_headers = {"Authorization": f"Bearer {self.accessToken}"}
-        session_body = {"item": {"@microsoft.graph.conflictBehavior": "replace", "name": filename}}
+        createSessionUrl = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/createUploadSession"
+        sessionHeaders = {"Authorization": f"Bearer {self.accessToken}"}
+        sessionBody = {"item": {"@microsoft.graph.conflictBehavior": "replace", "name": fileName}}
 
         print("Creating upload session...")
-        session_resp = requests.post(create_session_url, headers=session_headers, json=session_body)
-        print(f"Create session status: {session_resp.status_code}")
-        if session_resp.status_code not in (200, 201):
+        sessionResp = requests.post(createSessionUrl, headers=sessionHeaders, json=sessionBody)
+        print(f"Create session status: {sessionResp.status_code}")
+        if sessionResp.status_code not in (200, 201):
             print("Failed to create upload session:")
-            print(session_resp.text)
+            print(sessionResp.text)
             return
 
-        upload_url = session_resp.json().get("uploadUrl")
-        if not upload_url:
+        uploadUrl = sessionResp.json().get("uploadUrl")
+        if not uploadUrl:
             print("No uploadUrl returned by createUploadSession.")
             return
 
@@ -122,9 +122,9 @@ class oneDriveApi:
                 f.seek(start)
                 chunkData = f.read(chunkLength)
 
-                headers = {"Content-Length": str(chunkLength),"Content-Range": f"bytes {start}-{end}/{fileSize}"}
+                headers = {"Content-Length": str(chunkLength), "Content-Range": f"bytes {start}-{end}/{fileSize}"}
 
-                response = requests.put(upload_url, headers=headers, data=chunkData)
+                response = requests.put(uploadUrl, headers=headers, data=chunkData)
 
                 if response.status_code in (200, 201):
                     uploaded = fileSize
@@ -132,23 +132,21 @@ class oneDriveApi:
                     break
                 elif response.status_code == 202:
                     uploaded = end + 1
-                    progress = (uploaded / fileSize) * 100
                     continue
                 else:
-                    print(response.text)
                     return
 
         print("Large file upload finished.")
     
-    def listDir(self, onedrivePath):
+    def listDir(self, oneDrivePath):
         version = "v1.0"
-        urlSafePath = requests.utils.quote(onedrivePath)
+        urlSafePath = requests.utils.quote(oneDrivePath)
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
 
         response = requests.get(url=url, headers=headers)
         if response.status_code != 200:
-            print(f"listDir failed for {onedrivePath}: {response.status_code}")
+            print(f"listDir failed for {oneDrivePath}: {response.status_code}")
             return []
 
         data = response.json()
@@ -163,91 +161,92 @@ class oneDriveApi:
                 
         return results
     
-    def getMetaData(self, onedrivePath, output):
+    def getMetaData(self, oneDrivePath, output):
         version = "v1.0"
-        urlSafePath = requests.utils.quote(onedrivePath)
+        urlSafePath = requests.utils.quote(oneDrivePath)
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}"
         headers = {"Authorization": f"Bearer {self.accessToken}"}
 
-        response = requests.get(url=url,headers=headers)
-        if not response.status_code in (200,201):
+        response = requests.get(url=url, headers=headers)
+        if response.status_code not in (200, 201):
             print("getMetaData failed")
             print(response.status_code)
-            print(response.text)
             return
         
         data = response.json()
-        print(data[output])
-        return data[output]
+        if output == None:
+            return data
+        else:
+            return data.get(output)
     
-    def makeDir(self,onedrivePath,onedriveFolderName):
+    def makeDir(self, oneDrivePath, oneDriveFolderName):
         version = "v1.0"
-        urlSafePath = requests.utils.quote(onedrivePath)
-        parentId = self.getMetaData(urlSafePath,output="id")
-        url = f"https://graph.microsoft.com/{version}/me/drive/root/{parentId}/children"
+        urlSafePath = requests.utils.quote(oneDrivePath)
+        parentId = self.getMetaData(urlSafePath, output="id")
+        url = f"https://graph.microsoft.com/{version}/me/drive/items/{parentId}/children"
         headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/json"}
-        json = {"name": f"{onedriveFolderName}","folder": { },"@microsoft.graph.conflictBehavior": "rename"}
+        jsonData = {"name": f"{oneDriveFolderName}", "folder": {}, "@microsoft.graph.conflictBehavior": "rename"}
 
-        response = requests.post(url=url,headers=headers,json=json)
+        response = requests.post(url=url, headers=headers, json=jsonData)
         print(response.status_code)
-        print(response.text)
 
-class execution: 
-    def __init__(self,workers,api):
+
+class Execution: 
+    def __init__(self, workers, api):
         self.api = api
         self.workers = workers
 
-    def differ(self, localPath, onedrivePath):
-        onedriveSize = self.oneDriveApi.getMetaData(onedrivePath,"size")
-        onedriveDate = self.oneDriveApi.getMetaData(onedrivePath, "lastModifiedDateTime")
+    def differ(self, localPath, oneDrivePath):
+        oneDriveSize = self.api.getMetaData(oneDrivePath, "size")
+        oneDriveDate = self.api.getMetaData(oneDrivePath, "lastModifiedDateTime")
 
         localSize = os.path.getsize(localPath)
         localDate = os.path.getmtime(localPath)
 
-        if onedriveSize == localSize and onedriveDate == localDate:
+        if oneDriveSize == localSize and oneDriveDate == localDate:
             return False
         
-    def checkNames(self, names,localFolderPath):
+    def checkNames(self, names, localFolderPath):
         filteredNames = []
         for name in names:
             if not os.path.exists(os.path.join(localFolderPath, name)):
                 filteredNames.append(name)
         return filteredNames
 
-    def checkLocalFiles(self, names, onedriveFolder):
-        onedriveNames = self.api.listDir(onedriveFolder)
+    def checkLocalFiles(self, names, oneDriveFolder):
+        oneDriveItems = self.api.listDir(oneDriveFolder)
         filteredNames = []
         for name in names:
-            if name not in onedriveNames:
+            if name not in oneDriveItems:
                 filteredNames.append(name)
         return filteredNames
                 
 
-    def push(self,localFolderPath, onedriveFolder):
-        print("Scanning local folder:")
+    def push(self, localFolderPath, oneDriveFolder, executor=None):
+        print(f"Scanning local folder: {localFolderPath}")
+        
+        firstCall = executor is None
+        if firstCall:
+            executor = ThreadPoolExecutor(max_workers=self.workers)
+            print(f"Created a pool of {self.workers} threads!")
+        
         files = []
         folders = []
 
-        for entry in os.listdir(localFolderPath):
-            if os.path.isfile(os.path.join(localFolderPath, entry)):
-                files.append(entry)
-            if os.path.isdir(localFolderPath):
-                folders.append(entry)
+        for name in os.listdir(localFolderPath):
+            if os.path.isfile(os.path.join(localFolderPath, name)):
+                files.append(name)
+            elif os.path.isdir(os.path.join(localFolderPath, name)):
+                folders.append(name)
 
-        files = self.checkLocalFiles(files, onedriveFolder)
-        print(f"Found {len(files)} files to upload!")
-        
-        executer = ThreadPoolExecutor(max_workers=self.workers)
-        print("Created a pool of 4 threads!") 
+        files = self.checkLocalFiles(files, oneDriveFolder)
+        print(f"Found {len(files)} files to upload in {localFolderPath}!")
         
         futures = []
         for file in files:
             print(f"Scheduling upload for {file}")
-            future = executer.submit(self.api.uploadFile, onedriveFolder, os.path.join(localFolderPath, file))
+            future = executor.submit(self.api.uploadFile, oneDriveFolder, os.path.join(localFolderPath, file))
             futures.append(future)
-        
-        for folder in folders:
-            print(f"Scheduling creation for {file}")
         
         for future in as_completed(futures):
             try:
@@ -255,44 +254,88 @@ class execution:
             except Exception as e:
                 print(f"An upload failed: {e}")
         
-        executer.shutdown(wait=True)
-        print("All uploads finished!")
-    
-    def pull(self,localFolderPath, onedriveFolder):
-        print("Scanning OneDrive folder:")
-        files = []
-        for name in self.api.listDir(onedriveFolder):
-            files.append(name)
-        files = self.checkNames(files,localFolderPath)
-        print(f"Found {len(files)} files to dzownload!")
-        print(files)
+        listedDir = self.api.listDir(oneDriveFolder)
         
-        executer = ThreadPoolExecutor(max_workers=self.workers)
-        print("Created a pool of 4 threads!") 
+        for folder in folders:
+            if folder not in listedDir:
+                print(f"Creating folder: {folder}")
+                self.api.makeDir(oneDriveFolder, folder)
+            self.push(os.path.join(localFolderPath, folder), os.path.join(oneDriveFolder, folder), executor)
+
+        if firstCall:
+            executor.shutdown(wait=True)
+            print(f"All uploads finished")
+    
+    def pull(self, localFolderPath, oneDriveFolder, executor=None):
+        print(f"Scanning OneDrive folder: {oneDriveFolder}")
+        
+        firstCall = executor is None
+        if firstCall:
+            executor = ThreadPoolExecutor(max_workers=self.workers)
+            print(f"Created a pool of {self.workers} threads!")
+        
+        items = self.api.listDir(oneDriveFolder)
+        
+        files = []
+        folders = []
+        
+        for name in items:            
+            if "file" in self.api.getMetaData(os.path.join(oneDriveFolder, name), None):
+                files.append(name)
+            elif "folder" in self.api.getMetaData(os.path.join(oneDriveFolder, name), None):
+                folders.append(name)
+        
+        files = self.checkNames(files, localFolderPath)
+        print(f"Found {len(files)} files to download from {oneDriveFolder}!")
+        print(files)
 
         futures = []
         for file in files:
             print(f"Scheduling download for {file}")
-            future = executer.submit(self.api.downloadFile, os.path.join(onedriveFolder,file), localFolderPath)
+            future = executor.submit(self.api.downloadFile, os.path.join(oneDriveFolder, file), localFolderPath)
             futures.append(future)
-        
+
         for future in as_completed(futures):
             try:
                 future.result()
             except Exception as e:
                 print(f"A download failed: {e}")
 
+        for folder in folders:
+            localSubFolder = os.path.join(localFolderPath, folder)
+            if not os.path.exists(localSubFolder):
+                print(f"Creating local folder {folder}")
+                os.makedirs(localSubFolder)
+            self.pull(localSubFolder, os.path.join(oneDriveFolder, folder), executor)
+        
+        if firstCall:
+            executor.shutdown(wait=True)
+            print(f"All downloads finished")
+
 
 if __name__ == "__main__":
-    base_dir = "/home/gavin/downloads/icloud_api_config/"
-    onedrive_auth = os.path.join(base_dir, "onedrive_auth.txt")
-    onedriveAuthCache = os.path.join(base_dir, "onedrive_auth_cache.json")
+    baseDir = "/home/gavin/downloads/icloud_api_config/"
+    oneDriveAuth = os.path.join(baseDir, "onedrive_auth.txt")
+    oneDriveAuthCache = os.path.join(baseDir, "onedrive_auth_cache.json")
 
-    with open(onedrive_auth, "r") as f:
+    with open(oneDriveAuth, "r") as f:
         clientId = f.readline().strip()
         tenantId = f.readline().strip()
         scopes = f.readline().strip().split(",")
 
-    api = oneDriveApi(tenantId, clientId, scopes, onedriveAuthCache)
-    function = execution(6,api)
-    api.makeDir("Pictures/fanart/","sethoscara")
+    print("Enter the local path:")
+    localPath = input("")
+    print("Enter the oneDrivePath:")
+    oneDrivePath = input("")
+    print("Enter the desired operation:")
+    operation = input("")
+
+    api = OneDriveApi(tenantId, clientId, scopes, oneDriveAuthCache)
+    function = Execution(6, api)
+    if str.lower(operation) == "pull":
+        function.pull(localPath, oneDrivePath)
+    elif str.lower(operation) == "push":
+        function.push(localPath, oneDrivePath)
+    else:
+        print("invalid operation")
+        sys.exit(1)
