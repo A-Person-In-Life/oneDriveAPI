@@ -5,7 +5,6 @@ from msal import PublicClientApplication, SerializableTokenCache
 import webbrowser
 import sys
 
-
 class OneDriveApi:
     def __init__(self, tenantId, clientId, scopes, cachePath):
         self.tenantId = tenantId
