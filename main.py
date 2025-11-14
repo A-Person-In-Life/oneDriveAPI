@@ -194,16 +194,6 @@ class Execution:
     def __init__(self, workers, api):
         self.api = api
         self.workers = workers
-
-    def differ(self, localPath, oneDrivePath):
-        oneDriveSize = self.api.getMetaData(oneDrivePath, "size")
-        oneDriveDate = self.api.getMetaData(oneDrivePath, "lastModifiedDateTime")
-
-        localSize = os.path.getsize(localPath)
-        localDate = os.path.getmtime(localPath)
-
-        if oneDriveSize == localSize and oneDriveDate == localDate:
-            return False
         
     def checkNames(self, names, localFolderPath):
         filteredNames = []
@@ -219,7 +209,6 @@ class Execution:
             if name not in oneDriveItems:
                 filteredNames.append(name)
         return filteredNames
-                
 
     def push(self, localFolderPath, oneDriveFolder, executor=None):
         print(f"Scanning local folder: {localFolderPath}")
@@ -227,7 +216,7 @@ class Execution:
         if executor ==  None:
             firstCall = True
         if firstCall:
-            executor = ThreadPoolExecutor(max_workers=self.workers)
+            executor = InterpreterPoolExecutor(max_workers=self.workers)
             print(f"Created a pool of {self.workers} threads!")
         
         files = []
@@ -272,7 +261,7 @@ class Execution:
         if executor ==  None:
             firstCall = True
         if firstCall:
-            executor = ThreadPoolExecutor(max_workers=self.workers)
+            executor = InterpreterPoolExecutor(max_workers=self.workers)
             print(f"Created a pool of {self.workers} threads!")
         
         items = self.api.listDir(oneDriveFolder)
