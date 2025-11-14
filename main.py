@@ -3,6 +3,7 @@ import os
 import requests
 from msal import PublicClientApplication, SerializableTokenCache
 import webbrowser
+import sys
 
 class OneDriveApi:
     def __init__(self, tenantId, clientId, scopes, cachePath):
@@ -35,7 +36,7 @@ class OneDriveApi:
             self.accessToken = result["access_token"]
         else:
             raise ValueError(f"Error acquiring token: {result.get('error_description')}")
-        
+
         if tokenCache.has_state_changed:
             with open(cachePath, "w") as f:
                 f.write(tokenCache.serialize())
@@ -59,6 +60,8 @@ class OneDriveApi:
         if not downloadUrl or not fileName:
             print("Missing download URL or fileName")
             return
+            
+        print(f"Download URL: {downloadUrl}")
                 
         file = requests.get(downloadUrl)
         localPath = os.path.join(localDestination, fileName)
@@ -66,7 +69,7 @@ class OneDriveApi:
             f.write(file.content)
         
     def uploadFile(self, oneDriveFolder, localFilePath):
-        cutoffSize = 262144000
+        cutoffSize = 4000000
         version = "v1.0"
         fileName = os.path.basename(localFilePath)
         urlSafePath = requests.utils.quote(f"{oneDriveFolder}/{fileName}", safe="")
@@ -78,13 +81,14 @@ class OneDriveApi:
 
             with open(localFilePath, "rb") as f:
                 response = requests.put(url=url, headers=headers, data=f)
+                print(f"Status Code: {response.status_code}")
 
             if response.status_code not in (200, 201):
                 print("Upload failed:")
             else:
                 print("Small upload succeeded")
             return
-
+        #needs an upload session for files above 4mb
         createSessionUrl = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/createUploadSession"
         sessionHeaders = {"Authorization": f"Bearer {self.accessToken}"}
         sessionBody = {"item": {"@microsoft.graph.conflictBehavior": "replace", "name": fileName}}
@@ -177,7 +181,7 @@ class OneDriveApi:
     def makeDir(self, oneDrivePath, oneDriveFolderName):
         version = "v1.0"
         urlSafePath = requests.utils.quote(oneDrivePath)
-        parentId = self.getMetaData(urlSafePath, output="id")
+        parentId = self.getMetaData(oneDrivePath, output="id")
         url = f"https://graph.microsoft.com/{version}/me/drive/items/{parentId}/children"
         headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/json"}
         jsonData = {"name": f"{oneDriveFolderName}", "folder": {}, "@microsoft.graph.conflictBehavior": "rename"}
@@ -191,14 +195,16 @@ class Execution:
         self.api = api
         self.workers = workers
 
-    def chunkCount(self,folder,chunkSize):
-        folderSize = 0
+    def differ(self, localPath, oneDrivePath):
+        oneDriveSize = self.api.getMetaData(oneDrivePath, "size")
+        oneDriveDate = self.api.getMetaData(oneDrivePath, "lastModifiedDateTime")
 
-        for file in os.listdir(folder):
-            folder += os.path.getsize(file)
+        localSize = os.path.getsize(localPath)
+        localDate = os.path.getmtime(localPath)
 
-        return folderSize/chunkSize
-            
+        if oneDriveSize == localSize and oneDriveDate == localDate:
+            return False
+        
     def checkNames(self, names, localFolderPath):
         filteredNames = []
         for name in names:
@@ -218,7 +224,8 @@ class Execution:
     def push(self, localFolderPath, oneDriveFolder, executor=None):
         print(f"Scanning local folder: {localFolderPath}")
         
-        firstCall = executor is None
+        if executor ==  None:
+            firstCall = True
         if firstCall:
             executor = ThreadPoolExecutor(max_workers=self.workers)
             print(f"Created a pool of {self.workers} threads!")
@@ -262,20 +269,21 @@ class Execution:
     def pull(self, localFolderPath, oneDriveFolder, executor=None):
         print(f"Scanning OneDrive folder: {oneDriveFolder}")
         
-        firstCall = executor is None
+        if executor ==  None:
+            firstCall = True
         if firstCall:
             executor = ThreadPoolExecutor(max_workers=self.workers)
             print(f"Created a pool of {self.workers} threads!")
         
         items = self.api.listDir(oneDriveFolder)
-        
         files = []
         folders = []
         
         for name in items:            
-            if "file" in self.api.getMetaData(os.path.join(oneDriveFolder, name), None):
+            metaData = self.api.getMetaData(os.path.join(oneDriveFolder, name), None)
+            if "file" in metaData:
                 files.append(name)
-            elif "folder" in self.api.getMetaData(os.path.join(oneDriveFolder, name), None):
+            elif "folder" in metaData:
                 folders.append(name)
         
         files = self.checkNames(files, localFolderPath)
@@ -301,7 +309,7 @@ class Execution:
                 os.makedirs(localSubFolder)
             self.pull(localSubFolder, os.path.join(oneDriveFolder, folder), executor)
         
-        if firstCall == True:
+        if firstCall:
             executor.shutdown(wait=True)
             print(f"All downloads finished")
 
@@ -309,16 +317,19 @@ class Execution:
 if __name__ == "__main__":
     baseDir = "/home/gavin/downloads/icloud_api_config/"
     oneDriveAuth = os.path.join(baseDir, "onedrive_auth.txt")
-    oneDriveAuthCache = os.path.join(baseDir, "onedrive_oauth_cache.json")
+    oneDriveAuthCache = os.path.join(baseDir, "onedrive_auth_cache.json")
 
     with open(oneDriveAuth, "r") as f:
         clientId = f.readline().strip()
         tenantId = f.readline().strip()
         scopes = f.readline().strip().split(",")
 
-    localPath = input("Enter the local path:\n")
-    oneDrivePath = input("Enter the oneDrivePath:\n")
-    operation = input("Enter the desired operation:\n")
+    print("Enter the local path:")
+    localPath = input("")
+    print("Enter the oneDrivePath:")
+    oneDrivePath = input("")
+    print("Enter the desired operation:")
+    operation = input("")
 
     api = OneDriveApi(tenantId, clientId, scopes, oneDriveAuthCache)
     function = Execution(6, api)
@@ -328,3 +339,4 @@ if __name__ == "__main__":
         function.push(localPath, oneDrivePath)
     else:
         print("invalid operation")
+        sys.exit(1)
