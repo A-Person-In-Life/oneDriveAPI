@@ -3,8 +3,6 @@ import os
 import requests
 from msal import PublicClientApplication, SerializableTokenCache
 import webbrowser
-import sys
-
 class OneDriveApi:
     def __init__(self, tenantId, clientId, scopes, cachePath):
         self.tenantId = tenantId
@@ -328,4 +326,3 @@ if __name__ == "__main__":
         function.push(localPath, oneDrivePath)
     else:
         print("invalid operation")
-        sys.exit(1)
