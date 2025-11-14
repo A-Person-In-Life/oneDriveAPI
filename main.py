@@ -3,7 +3,6 @@ import os
 import requests
 from msal import PublicClientApplication, SerializableTokenCache
 import webbrowser
-import sys
 
 class OneDriveApi:
     def __init__(self, tenantId, clientId, scopes, cachePath):
@@ -36,7 +35,7 @@ class OneDriveApi:
             self.accessToken = result["access_token"]
         else:
             raise ValueError(f"Error acquiring token: {result.get('error_description')}")
-
+        
         if tokenCache.has_state_changed:
             with open(cachePath, "w") as f:
                 f.write(tokenCache.serialize())
@@ -60,8 +59,6 @@ class OneDriveApi:
         if not downloadUrl or not fileName:
             print("Missing download URL or fileName")
             return
-            
-        print(f"Download URL: {downloadUrl}")
                 
         file = requests.get(downloadUrl)
         localPath = os.path.join(localDestination, fileName)
@@ -81,7 +78,6 @@ class OneDriveApi:
 
             with open(localFilePath, "rb") as f:
                 response = requests.put(url=url, headers=headers, data=f)
-                print(f"Status Code: {response.status_code}")
 
             if response.status_code not in (200, 201):
                 print("Upload failed:")
@@ -195,16 +191,14 @@ class Execution:
         self.api = api
         self.workers = workers
 
-    def differ(self, localPath, oneDrivePath):
-        oneDriveSize = self.api.getMetaData(oneDrivePath, "size")
-        oneDriveDate = self.api.getMetaData(oneDrivePath, "lastModifiedDateTime")
+    def chunkCount(self,folder,chunkSize):
+        folderSize = 0
 
-        localSize = os.path.getsize(localPath)
-        localDate = os.path.getmtime(localPath)
+        for file in os.listdir(folder):
+            folder += os.path.getsize(file)
 
-        if oneDriveSize == localSize and oneDriveDate == localDate:
-            return False
-        
+        return folderSize/chunkSize
+            
     def checkNames(self, names, localFolderPath):
         filteredNames = []
         for name in names:
@@ -307,7 +301,7 @@ class Execution:
                 os.makedirs(localSubFolder)
             self.pull(localSubFolder, os.path.join(oneDriveFolder, folder), executor)
         
-        if firstCall:
+        if firstCall == True:
             executor.shutdown(wait=True)
             print(f"All downloads finished")
 
@@ -315,19 +309,16 @@ class Execution:
 if __name__ == "__main__":
     baseDir = "/home/gavin/downloads/icloud_api_config/"
     oneDriveAuth = os.path.join(baseDir, "onedrive_auth.txt")
-    oneDriveAuthCache = os.path.join(baseDir, "onedrive_auth_cache.json")
+    oneDriveAuthCache = os.path.join(baseDir, "onedrive_oauth_cache.json")
 
     with open(oneDriveAuth, "r") as f:
         clientId = f.readline().strip()
         tenantId = f.readline().strip()
         scopes = f.readline().strip().split(",")
 
-    print("Enter the local path:")
-    localPath = input("")
-    print("Enter the oneDrivePath:")
-    oneDrivePath = input("")
-    print("Enter the desired operation:")
-    operation = input("")
+    localPath = input("Enter the local path:\n")
+    oneDrivePath = input("Enter the oneDrivePath:\n")
+    operation = input("Enter the desired operation:\n")
 
     api = OneDriveApi(tenantId, clientId, scopes, oneDriveAuthCache)
     function = Execution(6, api)
@@ -337,4 +328,3 @@ if __name__ == "__main__":
         function.push(localPath, oneDrivePath)
     else:
         print("invalid operation")
-        sys.exit(1)
