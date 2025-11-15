@@ -1,8 +1,10 @@
 from concurrent.futures import *
+from urllib.parse import quote
 import os
 import requests
 from msal import PublicClientApplication, SerializableTokenCache
 import webbrowser
+
 class OneDriveApi:
     def __init__(self, tenantId, clientId, scopes, cachePath):
         self.tenantId = tenantId
@@ -10,7 +12,7 @@ class OneDriveApi:
         self.scopes = scopes
         self.accessToken = None
         self.cachePath = cachePath
-        
+
         authority = f"https://login.microsoftonline.com/{tenantId}"
         tokenCache = SerializableTokenCache()
         with open(cachePath, "r") as f:
@@ -38,14 +40,16 @@ class OneDriveApi:
         if tokenCache.has_state_changed:
             with open(cachePath, "w") as f:
                 f.write(tokenCache.serialize())
+        
+        self.session = requests.Session()
+        self.session.headers.update({"Authorization": f"Bearer {self.accessToken}"})
                 
     def downloadFile(self, oneDriveFolder, localDestination):
         version = "v1.0"
         urlSafePath = requests.utils.quote(oneDriveFolder, safe="/")
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}"
-        headers = {"Authorization": f"Bearer {self.accessToken}"}
 
-        response = requests.get(url, headers=headers)
+        response = self.session.get(url)
         print(f"Status Code: {response.status_code}")
         
         if response.status_code != 200:
@@ -61,7 +65,7 @@ class OneDriveApi:
             
         print(f"Download URL: {downloadUrl}")
                 
-        file = requests.get(downloadUrl)
+        file = self.session.get(downloadUrl)
         localPath = os.path.join(localDestination, fileName)
         with open(localPath, "wb") as f:
             f.write(file.content)
@@ -74,11 +78,11 @@ class OneDriveApi:
 
         if os.path.getsize(localFilePath) <= cutoffSize:
             url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/content"
-            headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/octet-stream"}
+            headers = {"Content-Type": "application/octet-stream"}
             print(headers)
 
             with open(localFilePath, "rb") as f:
-                response = requests.put(url=url, headers=headers, data=f)
+                response = self.session.put(url=url, headers=headers, data=f)
                 print(f"Status Code: {response.status_code}")
 
             if response.status_code not in (200, 201):
@@ -88,11 +92,10 @@ class OneDriveApi:
             return
         #needs an upload session for files above 4mb
         createSessionUrl = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/createUploadSession"
-        sessionHeaders = {"Authorization": f"Bearer {self.accessToken}"}
         sessionBody = {"item": {"@microsoft.graph.conflictBehavior": "replace", "name": fileName}}
 
         print("Creating upload session...")
-        sessionResp = requests.post(createSessionUrl, headers=sessionHeaders, json=sessionBody)
+        sessionResp = self.session.post(createSessionUrl, json=sessionBody)
         print(f"Create session status: {sessionResp.status_code}")
         if sessionResp.status_code not in (200, 201):
             print("Failed to create upload session:")
@@ -121,7 +124,7 @@ class OneDriveApi:
 
                 headers = {"Content-Length": str(chunkLength), "Content-Range": f"bytes {start}-{end}/{fileSize}"}
 
-                response = requests.put(uploadUrl, headers=headers, data=chunkData)
+                response = self.session.put(uploadUrl, headers=headers, data=chunkData)
 
                 if response.status_code in (200, 201):
                     uploaded = fileSize
@@ -139,9 +142,8 @@ class OneDriveApi:
         version = "v1.0"
         urlSafePath = requests.utils.quote(oneDrivePath)
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}:/children"
-        headers = {"Authorization": f"Bearer {self.accessToken}"}
 
-        response = requests.get(url=url, headers=headers)
+        response = self.session.get(url=url)
         if response.status_code != 200:
             print(f"listDir failed for {oneDrivePath}: {response.status_code}")
             return []
@@ -162,9 +164,8 @@ class OneDriveApi:
         version = "v1.0"
         urlSafePath = requests.utils.quote(oneDrivePath)
         url = f"https://graph.microsoft.com/{version}/me/drive/root:/{urlSafePath}"
-        headers = {"Authorization": f"Bearer {self.accessToken}"}
 
-        response = requests.get(url=url, headers=headers)
+        response = self.session.get(url=url,)
         if response.status_code not in (200, 201):
             print("getMetaData failed")
             print(response.status_code)
@@ -178,13 +179,12 @@ class OneDriveApi:
     
     def makeDir(self, oneDrivePath, oneDriveFolderName):
         version = "v1.0"
-        urlSafePath = requests.utils.quote(oneDrivePath)
         parentId = self.getMetaData(oneDrivePath, output="id")
         url = f"https://graph.microsoft.com/{version}/me/drive/items/{parentId}/children"
-        headers = {"Authorization": f"Bearer {self.accessToken}", "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json"}
         jsonData = {"name": f"{oneDriveFolderName}", "folder": {}, "@microsoft.graph.conflictBehavior": "rename"}
 
-        response = requests.post(url=url, headers=headers, json=jsonData)
+        response = self.session.post(url=url, headers=headers, json=jsonData)
         print(response.status_code)
 
 
@@ -214,7 +214,7 @@ class Execution:
         if executor ==  None:
             firstCall = True
         if firstCall:
-            executor = InterpreterPoolExecutor(max_workers=self.workers)
+            executor = ThreadPoolExecutor(max_workers=self.workers)
             print(f"Created a pool of {self.workers} threads!")
         
         files = []
@@ -259,7 +259,7 @@ class Execution:
         if executor ==  None:
             firstCall = True
         if firstCall:
-            executor = InterpreterPoolExecutor(max_workers=self.workers)
+            executor = ThreadPoolExecutor(max_workers=self.workers)
             print(f"Created a pool of {self.workers} threads!")
         
         items = self.api.listDir(oneDriveFolder)
@@ -302,9 +302,9 @@ class Execution:
 
 
 if __name__ == "__main__":
-    baseDir = "/home/gavin/downloads/icloud_api_config/"
+    baseDir = "/home/gavin/desktop/python_projects/onedriveApi/config/"
     oneDriveAuth = os.path.join(baseDir, "onedrive_auth.txt")
-    oneDriveAuthCache = os.path.join(baseDir, "onedrive_auth_cache.json")
+    oneDriveAuthCache = os.path.join(baseDir, "onedrive_oauth_cache.json")
 
     with open(oneDriveAuth, "r") as f:
         clientId = f.readline().strip()
