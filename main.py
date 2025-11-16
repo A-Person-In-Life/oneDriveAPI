@@ -154,5 +154,3 @@ function = Executor(api)
 asyncio.run(function.push("/home/gavin/test/", "test/"))
 endTime = time.time()
 print(f"Runtime: {endTime-startTime}")
-
-
