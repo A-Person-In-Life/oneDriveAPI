@@ -118,11 +118,7 @@ class S3Api:
         print(f"Multipart upload completed for {s3Path}")
         
     def listDir(self, s3Folder, operation=None):
-        url = self.client.generate_presigned_url(
-            ClientMethod="list_objects_v2", 
-            Params={"Bucket": self.bucketName, "Prefix": s3Folder, "Delimiter": "/"}, 
-            ExpiresIn=30
-        )
+        url = self.client.generate_presigned_url(ClientMethod="list_objects_v2", Params={"Bucket": self.bucketName, "Prefix": s3Folder, "Delimiter": "/"}, ExpiresIn=30)
         response = requests.get(url)
         subfolders = []
         filenames = []
@@ -195,6 +191,9 @@ class Executor:
         s3FolderBasenames = []
         tasks = []
 
+        if not os.path.exists(localFolder):
+            os.mkdir(localFolder)
+
         for filePath in s3Filenames:
             s3Basenames.append(os.path.basename(filePath))
         for subfolderPath in s3Subfolders:
@@ -214,12 +213,25 @@ class Executor:
                 os.makedirs(localSubfolder)
             await self.pull(localSubfolder, subfolderPath)
 
+def interface():
+    print("Local Path:")
+    localPath = input("")
+    print("S3 Path:")
+    s3Path = input("")
+    print("Operation:")
+    operation = input("")
+    return localPath, s3Path, operation
+
 async def main():
+    localPath, s3Path, operation = interface()
     startTime = time.time()
     api = S3Api("/home/gavin/desktop/python_projects/onedriveApi/config/aws_auth.txt")
     await api.startUp()
     function = Executor(api)
-    await function.push("/home/gavin/s3_storage/asmr/", "asmr/")
+    if operation == "push":
+        await function.push(localPath, s3Path)
+    elif operation == "pull":
+        await function.push(localPath, s3Path)
     await api.shutDown()
     endTime = time.time()
     print(f"Runtime: {endTime-startTime}")
