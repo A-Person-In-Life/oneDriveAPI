@@ -96,7 +96,11 @@ class S3Api:
         partSize = 5242880
         fileSize = os.path.getsize(localFolder)
         totalParts = math.ceil(fileSize / partSize)
+        parts_data = []
         partUrls = []
+
+        if not s3Path:
+            s3Path = os.path.basename(localFolder)
 
         response = self.client.create_multipart_upload(Bucket=self.bucketName, Key=s3Path)
         uploadId = response["UploadId"]
@@ -105,20 +109,28 @@ class S3Api:
             url = self.client.generate_presigned_url(ClientMethod="upload_part", Params={"Bucket": self.bucketName, "Key": s3Path, "UploadId": uploadId, "PartNumber": i}, ExpiresIn=3600)
             partUrls.append(url)
 
-        tasks = []
         async with aiofiles.open(localFolder, "rb") as f:
-            for i in range(totalParts):
+            for interation in range(totalParts):
                 part = await f.read(partSize)
-                task = self.uploadPart(localFolder, i + 1, partUrls[i], part, totalParts)
+                parts_data.append(part)
+
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for i in range(totalParts):
+                task = self.uploadPart(localFolder,i + 1, partUrls[i], parts_data[i], session, totalParts)
                 tasks.append(task)
-            
-        endData = await asyncio.gather(*tasks)
+            endData = await asyncio.gather(*tasks)
 
         self.client.complete_multipart_upload(Bucket=self.bucketName, Key=s3Path, UploadId=uploadId, MultipartUpload={"Parts": endData})
         print(f"Multipart upload completed for {s3Path}")
+
         
     def listDir(self, s3Folder, operation=None):
-        url = self.client.generate_presigned_url(ClientMethod="list_objects_v2", Params={"Bucket": self.bucketName, "Prefix": s3Folder, "Delimiter": "/"}, ExpiresIn=30)
+        url = self.client.generate_presigned_url(
+            ClientMethod="list_objects_v2", 
+            Params={"Bucket": self.bucketName, "Prefix": s3Folder, "Delimiter": "/"}, 
+            ExpiresIn=30
+        )
         response = requests.get(url)
         subfolders = []
         filenames = []
@@ -191,9 +203,6 @@ class Executor:
         s3FolderBasenames = []
         tasks = []
 
-        if not os.path.exists(localFolder):
-            os.mkdir(localFolder)
-
         for filePath in s3Filenames:
             s3Basenames.append(os.path.basename(filePath))
         for subfolderPath in s3Subfolders:
@@ -213,25 +222,12 @@ class Executor:
                 os.makedirs(localSubfolder)
             await self.pull(localSubfolder, subfolderPath)
 
-def interface():
-    print("Local Path:")
-    localPath = input("")
-    print("S3 Path:")
-    s3Path = input("")
-    print("Operation:")
-    operation = input("")
-    return localPath, s3Path, operation
-
 async def main():
-    localPath, s3Path, operation = interface()
     startTime = time.time()
-    api = S3Api("/home/gavin/desktop/python_projects/onedriveApi/config/aws_auth.txt")
+    api = S3Api("/home/gavin/desktop/coding_projects/python/onedriveApi/config/aws_auth.txt")
     await api.startUp()
     function = Executor(api)
-    if operation == "push":
-        await function.push(localPath, s3Path)
-    elif operation == "pull":
-        await function.push(localPath, s3Path)
+    await function.push("/home/gavin/test/", "test/")
     await api.shutDown()
     endTime = time.time()
     print(f"Runtime: {endTime-startTime}")
